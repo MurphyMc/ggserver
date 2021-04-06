@@ -1,0 +1,8 @@
+.*
+*.bak
+*.old
+*.py[cod]
+*.so
+*.o
+*~
+__pycache__/
