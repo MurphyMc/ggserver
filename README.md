@@ -90,7 +90,7 @@ Contains a mass of information about the room.
 * `allow_spectators`: True if spectators are allowed in this room.
 * `size`: The size of this room.
 * `is_ready`: Whether the room is ready (has the right number of players).
-* `was_ready`: Whether the room was ready the last to status was sent.
+* `was_ready`: Whether the room was ready the last time status was sent.
 * `leaderstate`: See the `LEADERSTATE` client message.
 
 ### `CHOOSE`
