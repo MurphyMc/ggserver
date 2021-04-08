@@ -1,0 +1,111 @@
+#================================================================================
+# TTT.rogue
+# April 6, 2021
+#================================================================================
+
+$requireRogue "1.8.1"
+
+uses Utility/CommandLineParser
+
+$include "GGClient.rogue"
+
+try
+  TTT( System.command_line_arguments )
+catch (error:Error)
+  local w = Console.width.or_smaller( 80 )
+  Console.error.println "="*w
+  Console.error.println "ERROR"
+  Console.error.println error->String.word_wrapped(w-2).indented(2)
+  Console.error.println "="*w
+  System.exit 1
+endTry
+
+class TTT
+  PROPERTIES
+    client : GGClient
+    board  : Board
+
+  METHODS
+    method init( args:String[] )
+      local command = CommandLineParser().
+      [
+        # option( "--flag", &alias="-f" )
+        # option( "--setting=",  &alias="-s" )
+      ].parse( System.command_line_arguments )
+
+      #trace command
+      # has //options and possibly //args
+
+      client = GGClient()
+      client.configure( "ttt", "Rogue", 2)
+      client.connect( "localhost" )
+      board = Board()
+      loop
+        client.update
+        on( forEach in client )
+        System.sleep(0.1)
+      endLoop
+
+    method take_turn
+      println ''Enter move as "x y". For example: 0 2''
+      local coords = Console.input( "> " )
+      local pair = coords.replacing( ",", " " ).split( ' ' )
+      if (pair and pair.count == 2)
+        local i = pair[0]->Int32
+        local j = pair[1]->Int32
+        client.send_data( @{type:"MOVE", pos:[i,j], player:which{client.is_leader:"X"||"O"}, board:board->String} )
+      endIf
+
+    method on( e:GGClientEvent )
+      if (not e.is_original_message)
+        println e.type
+        println e.message
+      endIf
+
+      if (e.is_game_start)
+        board = Board()
+        board.display
+        if (client.is_leader)
+          take_turn
+        endIf
+
+      elseIf (e.is_data)
+        local data = e.data
+        which (data//type)
+          case "MOVE"
+            board.update( data//board, data//player, data//pos[0], data//pos[1] )
+            board.display
+            if (not e.is_echo) take_turn
+        endWhich
+      endIf
+
+endClass
+
+class Board
+  PROPERTIES
+    grid = Dim<<Character>>(9)
+
+  METHODS
+    method init
+      grid[ forEach of grid ] = 'B'
+
+    method display
+      println " 012"
+      forEach (j in 0..2)
+        print j
+        forEach (i in 0..2)
+          local ch = grid[j*3+i]
+          if (ch == 'B') print '.'
+          else           print ch
+        endForEach
+        println
+      endForEach
+
+    method to->String
+      return String(grid)
+
+    method update( grid_state:String, mark:Character, i:Int32, j:Int32 )
+      forEach (ch at index in grid_state) grid[index] = ch
+      grid[j*3+i] = mark
+endClass
+

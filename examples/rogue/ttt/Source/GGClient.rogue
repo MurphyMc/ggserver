@@ -1,0 +1,343 @@
+$include "Standard/Sockets.rogue"
+
+class GGClient : Reader<<GGClientEvent>>
+  DEFINITIONS
+    SOCKET_DISCONNECTED = 0
+    SOCKET_CONNECTING   = 1
+    SOCKET_CONNECTED    = 2
+
+  PROPERTIES
+    game_name        : String
+    player_name      : String
+    min_players      : Int32
+    max_players      : Int32
+    allow_spectators = true
+
+    address          = "localhost"
+    port             = 9876
+
+    is_leader        : Logical       
+    is_game_active   : Logical
+    is_spectator     : Logical
+
+    leaderstate      : Value
+    users            = @{}
+    error            : String
+
+    _events          = GGClientEvent[]
+
+    _ping_timer      = Timer(60)
+
+    _socket          : Socket
+    _socket_state    = SOCKET_DISCONNECTED : Int32
+    _buffer          = Byte[]
+
+  METHODS
+    method configure( game_name:String, player_name:String, player_count:Int32, is_spectator=false )
+      configure( game_name, player_name, player_count, player_count, &=is_spectator )
+
+    method configure( game_name, player_name, min_players, max_players, is_spectator=false )
+
+    method connect
+      # Reconnect using the existing address and port
+      connect( address, port )
+
+    method connect( address, port=9876 )
+      disconnect
+      _socket = Socket( address, port )
+      error  = null
+      is_game_active = false
+      _socket_state = SOCKET_CONNECTING
+
+    method disconnect
+      is_game_active = false
+      _socket_state = SOCKET_DISCONNECTED
+      if (_socket) _socket.close
+
+    method has_another->Logical
+      if (_events.is_empty) return false
+      return true
+
+    method is_connected->Logical
+      return (_socket_state == SOCKET_CONNECTED)
+
+    method is_connecting->Logical
+      return (_socket_state == SOCKET_CONNECTING)
+
+    method is_waiting_for_players->Logical
+      return is_connected and not is_game_active
+
+    method peek->GGClientEvent
+      if (not has_another) return null
+      return _events.first
+
+    method read->GGClientEvent
+      if (not has_another) return null
+      return _events.remove_first
+
+    method send( type:String, message=@{}:Value )
+      if (_socket_state == SOCKET_CONNECTED)
+        message//TYPE = type
+        _socket.printer.println( message.to_json )
+      endIf
+      _ping_timer.restart
+
+    method send_data( data:Value, user=null:String, &only_players, &only_spectators )
+      local m = @{ msg:data }
+      if (only_spectators)  m//target = "S"
+      elseIf (only_players) m//target = "P"
+      if (user)
+        m//user = user
+        send( "PRIV", m )
+      else
+        send( "DATA", m )
+      endIf
+
+    method set_is_game_active( setting:Logical )
+      if (@is_game_active != setting)
+        @is_game_active = setting
+        if (setting)
+          _events.add( GGClientEvent(GGClientEventType.GAME_START, @{YOU_LEAD:is_leader}) )
+        else
+          @is_leader = false
+          _events.add( GGClientEvent(GGClientEventType.GAME_STOP, @{YOU_LEAD:is_leader}) )
+          if (is_connected) _events.add( GGClientEvent(GGClientEventType.WAITING_FOR_PLAYERS) )
+        endIf
+      endIf
+
+    method set_is_leader( setting:Logical )
+      if (@is_leader != setting)
+        @is_leader = setting
+        if (setting) _events.add( GGClientEvent( GGClientEventType.BECOME_LEADER, @{:leaderstate} ) )
+      endIf
+
+    method set__socket_state( setting:Int32 )
+      if (@_socket_state != setting)
+        @_socket_state = setting
+        which (setting)
+          case SOCKET_DISCONNECTED: _events.add( GGClientEvent(GGClientEventType.DISCONNECTED) )
+          case SOCKET_CONNECTING:   _events.add( GGClientEvent(GGClientEventType.CONNECTING) )
+          case SOCKET_CONNECTED:    _events.add( GGClientEvent(GGClientEventType.CONNECTED) )
+        endWhich
+      endIf
+
+    method update
+      which (_socket_state)
+        case SOCKET_CONNECTING
+          if (_socket.is_connected)
+            _socket_state = SOCKET_CONNECTED
+          elseIf (not _socket.is_connecting)
+            _socket_state = SOCKET_DISCONNECTED
+            error = "Cannot connect to $:$" (address,port)
+            _events.add( GGClientEvent( GGClientEventType.ERROR, @{DESC:error} ) )
+          endIf
+
+        case SOCKET_CONNECTED
+          if (_socket.is_connected)
+            local reader = _socket.reader
+            if (reader.has_another)
+              while (reader.has_another)
+                local b = reader.read
+                if (b == '\n')
+                  _process( JSON.parse(String(_buffer)) )
+                  _buffer.clear
+                else
+                  _buffer.add Character(b)
+                endIf
+              endWhile
+            endIf
+          else
+            is_game_active = false
+            _socket_state = SOCKET_CONNECTING  # successive update()s will handle further
+          endIf
+      endWhich
+
+      if (_ping_timer.is_expired) send( "PING" )
+
+    method _process( m:Value )
+      _events.add( GGClientEvent(GGClientEventType.ORIGINAL_MESSAGE,m) )
+
+      if (m.contains("YOU_LEAD"))    is_leader = m//YOU_LEAD
+      if (m.contains("leaderstate")) leaderstate = m//leaderstate
+
+      which (m//TYPE)
+        case "HELLO"
+          # HELLO is the initial message sent by server once connection is established.
+          # Send a HELLO in response; server will respond with WELCOME.
+          send( "HELLO", @{ gamename:game_name, name:player_name } )
+          _events.add( GGClientEvent(GGClientEventType.LOGGING_IN) )
+
+        case "WELCOME"
+          local join_mesg = @{ :allow_spectators }
+          if (min_players == max_players) join_mesg//size = min_players
+          else                            join_mesg//size = "$-$"(min_players,max_players)
+          
+          send( which{is_spectator:"SPECTATE_GAME" || "JOIN_GAME"}, join_mesg )
+          _events.add( GGClientEvent(GGClientEventType.JOINING_ROOM) )
+
+        case "ERROR"
+          error = m//DESC
+          if (not String.exists(error)) error = ""+m//ERR
+          _events.add( GGClientEvent( GGClientEventType.ERROR, m ) )
+
+        case "ROOM_STATUS"
+          _events.add( GGClientEvent(GGClientEventType.ROOM_STATUS,m) )
+          is_game_active = m//is_ready
+
+        case "DATA", "PRIV"
+          _events.add( GGClientEvent(GGClientEventType.DATA,m) )
+
+        case "JOIN"
+          users[ m//user ] = m
+          _events.add( GGClientEvent(GGClientEventType.USER_INFO,m) )
+
+        case "LEAVE"
+          users.remove( m//user )
+          _events.add( GGClientEvent(GGClientEventType.USER_INFO,m) )
+
+        case "SPEC_JOIN"
+          m .= cloned
+          m//spectator = true
+          users[ m//user ] = m
+          _events.add( GGClientEvent(GGClientEventType.USER_INFO,m) )
+
+        case "SPEC_LEAVE"
+          m .= cloned
+          m//spectator = true
+          users.remove( m//user )
+          _events.add( GGClientEvent(GGClientEventType.USER_INFO,m) )
+
+        case "CHOOSE"
+          _events.add( GGClientEvent(GGClientEventType.CHOICE,m) )
+
+        case "RANDINT"
+          _events.add( GGClientEvent(GGClientEventType.RANDOM_INTEGER,m) )
+
+      endWhich
+
+endClass
+
+enum GGClientEventType
+  BECOME_LEADER
+  CHOICE
+  CONNECTED
+  CONNECTING
+  DATA
+  DISCONNECTED
+  ERROR          
+  GAME_START
+  GAME_STOP
+  JOINING_ROOM
+  LOGGING_IN
+  ORIGINAL_MESSAGE
+  RANDOM_INTEGER
+  ROOM_STATUS
+  USER_INFO
+  WAITING_FOR_PLAYERS
+endEnum
+
+class GGClientEvent( type:GGClientEventType, message=@{}:Value )
+  METHODS
+    method choice->Value
+      # Valid for .is_choice 
+      return message//result
+
+    method data->Value
+      # Valid for .is_data 
+      return message//msg
+
+    method error_code->Int32
+      # Valid when is_error()
+      return message//ERR->Int32
+
+    method error_message->String
+      # Valid when is_error()
+      return message//DESC->String
+
+    method is_become_leader->Logical
+      return (type == GGClientEventType.BECOME_LEADER)
+
+    method is_choice->Logical
+      return (type == GGClientEventType.CHOICE)
+
+    method is_connected->Logical
+      return (type == GGClientEventType.CONNECTED)
+
+    method is_connecting->Logical
+      return (type == GGClientEventType.CONNECTING)
+
+    method is_data->Logical
+      return (type == GGClientEventType.DATA)
+
+    method is_disconnected->Logical
+      return (type == GGClientEventType.DISCONNECTED)
+
+    method is_error->Logical
+      return (type == GGClientEventType.ERROR)
+
+    method is_echo->Logical
+      return (message//ECHO->Logical)
+
+    method is_logging_in->Logical
+      return (type == GGClientEventType.LOGGING_IN)
+
+    method is_joining_room->Logical
+      return (type == GGClientEventType.JOINING_ROOM)
+
+    method is_original_message->Logical
+      return (type == GGClientEventType.ORIGINAL_MESSAGE)
+
+    method is_private->Logical
+      # Valid for .is_data()
+      return (is_data and message//TYPE == "PRIV")
+
+    method is_random_integer->Logical
+      # Use event->Int32 or event->Int32[] to retrieve.
+      return (type == GGClientEventType.RANDOM_INTEGER and not message//result.is_list)
+
+    method is_random_integer_list->Logical
+      # Use event->Int32[] to retrieve.
+      return (type == GGClientEventType.RANDOM_INTEGER and message//result.is_list)
+
+    method is_room_status->Logical
+      return (type == GGClientEventType.ROOM_STATUS)
+
+    method is_spectator->Logical
+      # Valid for .is_user_joined() and .is_user_left()
+      return (message//spectator->Logical)
+
+    method is_game_start->Logical
+      return (type == GGClientEventType.GAME_START)
+
+    method is_game_stop->Logical
+      return (type == GGClientEventType.GAME_STOP)
+
+    method is_user_info->Logical
+      # Either is_user_joined() or is_user_left() will also be true
+      return (type == GGClientEventType.USER_INFO)
+
+    method is_user_joined->Logical
+      return (is_user_info and message//TYPE == "JOIN")
+
+    method is_user_left->Logical
+      return (is_user_info and message//TYPE == "LEAVE")
+
+    method is_waiting_for_players->Logical
+      return (type == GGClientEventType.WAITING_FOR_PLAYERS)
+
+    method options->Value
+      # Valid for .is_choice (list of options may not be available; .options.is_empty if not)
+      return message//opts
+
+    method to->Int32
+      # Valid when is_random_integer()
+      if (is_random_integer) return message//result->Int32
+      else                   return 0
+
+    method to->Int32[]
+      # Valid when is_random_integer_list() or is_random_integer()
+      if (is_random_integer_list) return message//result.to_list<<Int32>>
+      elseIf (is_random_integer)  return [ this->Int32 ]
+      else                        return Int32[]
+endClass
+

@@ -1,0 +1,8 @@
+Build
+.rogo
+*.swp
+*.swo
+*.swn
+BuildLocal.rogue
+Source/Mage/VM/*.rogue
+!.gitignore
