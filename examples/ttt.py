@@ -6,7 +6,7 @@ import string
 from socket import (socket, AF_INET, SOCK_STREAM, IPPROTO_TCP)
 from socket import timeout as socket_timeout
 from socket import error as socket_error
-from errno import EAGAIN
+import errno
 import json
 
 
@@ -286,7 +286,7 @@ class Network (object):
       except socket_timeout:
         pass
       except socket_error as e:
-        if e.errno != EAGAIN: raise
+        if e.errno != errno.EAGAIN: raise
       except Exception:
         add_hist("Socket send error")
         self.close()
@@ -304,8 +304,10 @@ class Network (object):
           msg,self.inbuf = self.inbuf.split(b"\n", 1)
           msg = json.loads(msg)
           msgs.append(msg)
+    except WindowsError as e:
+      if e.winerror != errno.WSAEWOULDBLOCK: raise
     except socket_error as e:
-      if e.errno != EAGAIN: raise
+      if e.errno != errno.EAGAIN: raise
     except socket_timeout:
       pass
     except Exception as e:
