@@ -57,7 +57,7 @@ class TTT
       endIf
 
     method on( e:GGClientEvent )
-      if (not e.is_original_message)
+      if (not e.is_raw_message)
         println e.type
         println e.message
       endIf

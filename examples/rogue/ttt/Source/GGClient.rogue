@@ -75,6 +75,33 @@ class GGClient : Reader<<GGClientEvent>>
       if (not has_another) return null
       return _events.remove_first
 
+    method request_random_choice( list=null:Value, message=null:Value, &show, &echo,
+        user=null:String, &only_players, &only_spectators )
+      local m = @{}
+      if (list) m//opts = list
+      if (message) m//msg = message
+      if (show) m//show = true
+      if (echo) m//echo = true
+      if (user) m//user = user
+      if (only_spectators)  m//target = "S"
+      elseIf (only_players) m//target = "P"
+      send( "CHOOSE", m )
+
+    method request_random_integer( low:Int32, high:Int32, count=1:Int32, message=null:Value, &show, &echo,
+        user=null:String, &only_players, &only_spectators )
+      local m = @{ lo:low, hi:high }
+      if (count > 1) m//count = count
+      if (message) m//msg = message
+      if (show) m//show = true
+      if (echo) m//echo = true
+      if (user) m//user = user
+      if (only_spectators)  m//target = "S"
+      elseIf (only_players) m//target = "P"
+      send( "RANDINT", m )
+
+    method request_random_player( message=null:Value, &show, &echo, user=null:String, &only_players, &only_spectators )
+      request_random_choice( null, message, &=show, &=echo, &=user, &=only_players, &=only_spectators )
+
     method send( type:String, message=@{}:Value )
       if (_socket_state == SOCKET_CONNECTED)
         message//TYPE = type
@@ -155,7 +182,7 @@ class GGClient : Reader<<GGClientEvent>>
       if (_ping_timer.is_expired) send( "PING" )
 
     method _process( m:Value )
-      _events.add( GGClientEvent(GGClientEventType.ORIGINAL_MESSAGE,m) )
+      _events.add( GGClientEvent(GGClientEventType.RAW_MESSAGE,m) )
 
       if (m.contains("YOU_LEAD"))    is_leader = m//YOU_LEAD
       if (m.contains("leaderstate")) leaderstate = m//leaderstate
@@ -229,7 +256,7 @@ enum GGClientEventType
   GAME_STOP
   JOINING_ROOM
   LOGGING_IN
-  ORIGINAL_MESSAGE
+  RAW_MESSAGE
   RANDOM_INTEGER
   ROOM_STATUS
   USER_INFO
@@ -239,7 +266,8 @@ endEnum
 class GGClientEvent( type:GGClientEventType, message=@{}:Value )
   METHODS
     method choice->Value
-      # Valid for .is_choice 
+      # Valid when .is_random_choice == true
+      # Result of .request_random_choice or .request_random_player
       return message//result
 
     method data->Value
@@ -256,9 +284,6 @@ class GGClientEvent( type:GGClientEventType, message=@{}:Value )
 
     method is_become_leader->Logical
       return (type == GGClientEventType.BECOME_LEADER)
-
-    method is_choice->Logical
-      return (type == GGClientEventType.CHOICE)
 
     method is_connected->Logical
       return (type == GGClientEventType.CONNECTED)
@@ -284,12 +309,13 @@ class GGClientEvent( type:GGClientEventType, message=@{}:Value )
     method is_joining_room->Logical
       return (type == GGClientEventType.JOINING_ROOM)
 
-    method is_original_message->Logical
-      return (type == GGClientEventType.ORIGINAL_MESSAGE)
-
     method is_private->Logical
       # Valid for .is_data()
       return (is_data and message//TYPE == "PRIV")
+
+    method is_random_choice->Logical
+      # Indicates message contains result of .request_random_choice or .request_random_player
+      return (type == GGClientEventType.CHOICE)
 
     method is_random_integer->Logical
       # Use event->Int32 or event->Int32[] to retrieve.
@@ -298,6 +324,9 @@ class GGClientEvent( type:GGClientEventType, message=@{}:Value )
     method is_random_integer_list->Logical
       # Use event->Int32[] to retrieve.
       return (type == GGClientEventType.RANDOM_INTEGER and message//result.is_list)
+
+    method is_raw_message->Logical
+      return (type == GGClientEventType.RAW_MESSAGE)
 
     method is_room_status->Logical
       return (type == GGClientEventType.ROOM_STATUS)
@@ -326,7 +355,7 @@ class GGClientEvent( type:GGClientEventType, message=@{}:Value )
       return (type == GGClientEventType.WAITING_FOR_PLAYERS)
 
     method options->Value
-      # Valid for .is_choice (list of options may not be available; .options.is_empty if not)
+      # Valid for .is_random_choice (list of options may not be available; .options.is_empty if not)
       return message//opts
 
     method to->Int32
