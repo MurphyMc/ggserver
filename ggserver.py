@@ -557,7 +557,8 @@ class Connection (ConnectionBase):
     if 'opts' in msg:
       opts = msg['opts']
     else:
-      opts = list(self.members)
+      opts = [m.name for m in self.room.members]
+
     choice = random.choice(opts)
 
     omsg = Msg("CHOOSE", echo = msg.get("echo", True))
