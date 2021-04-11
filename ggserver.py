@@ -10,6 +10,9 @@ import random
 
 from collections import defaultdict
 
+from ggwebsocket import WebInterface
+
+
 """
 TODO
 ----
@@ -659,6 +662,41 @@ def main_loop ():
 
 
 
+class WSConnection (Connection):
+  def __init__ (self, deframer):
+    self.deframer = deframer
+    deframer.init(self.wsprocess, self._send)
+
+    super(WSConnection, self).__init__(self.deframer.sock)
+
+  def send (self, msg):
+    return self._send(self.deframer.frame(json.dumps(msg).encode("utf8") + b'\n'))
+
+  def wsprocess (self, opcode, data):
+    if not data: return
+    self.process(data.strip())
+
+  def do_recv (self):
+    data = self.sock.recv(4*1024)
+    if not data:
+      self.quit()
+      return
+
+    self.deframer.feed(data)
+
+
+
+def on_new_ws (_, init):
+  WSConnection(init)
+
+
+
+def wsinit (bind_address, serve_files):
+  global web
+  web = WebInterface(bind_address, on_new_ws, serve_files=serve_files)
+
+
+
 if __name__ == '__main__':
   import argparse
 
@@ -667,6 +705,12 @@ if __name__ == '__main__':
                  default=BIND_PORT)
   p.add_argument("--bind-addr", type=str, help="IP address to bind to; leave "
                  + "empty to bind to all local addresses", default='')
+  p.add_argument("--wsbind-port", type=int, help="TCP port to bind to",
+                 default=BIND_PORT+1)
+  p.add_argument("--wsbind-addr", type=str, help="IP address to bind to; leave"
+                 + " empty to bind to all local addresses", default='')
+  p.add_argument("--serve-files", action='store_true', help="If set, the "
+                 "web server will serve files from web/ as well as websockets")
   p.add_argument("--log-level", type=str, help="Log level", default="INFO")
 
   args = p.parse_args()
@@ -678,6 +722,7 @@ if __name__ == '__main__':
       log.setLevel(l)
 
   init((args.bind_addr,args.bind_port))
+  wsinit((args.wsbind_addr,args.wsbind_port), serve_files=args.serve_files)
 
   try:
     main_loop()

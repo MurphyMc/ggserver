@@ -1,0 +1,823 @@
+<html>
+<head>
+<title>Tic-Tac-Toe</title>
+
+<style>
+</style>
+
+
+<!--
+**     **   **     **   **     **   **     **   **     **
+ **   **     **   **     **   **     **   **     **   **
+  ** **       ** **       ** **       ** **       ** **
+   ***         ***         ***         ***         ***
+-->
+
+<script type="text/plain" id="sourcecode">
+
+def print (*args):
+  d = " ".join(str(x) for x in args)
+  import js
+  js.window.console.log("PY:", d)
+
+
+import sys
+import time
+import string
+import json
+
+
+B = 'B'
+X = 'X'
+O = 'O'
+
+
+
+# ---------------------------------------------------------------------------
+# The actual game
+# ---------------------------------------------------------------------------
+
+class TicTacToe (object):
+  def __init__ (self):
+    self.ready = False
+    self.i_am = X
+    self.my_turn = False
+    self.new_game = False
+    self.name = None # No name set yet
+    self.spectate = False
+
+    self.board = B * 9
+
+    self.set(1,1,X)
+    self.set(0,0,O)
+    self.set(2,2,O)
+
+  def get (self, x, y):
+    return self.board[y*3 + x]
+
+  def set (self, x, y, v):
+    p = y * 3 + x
+    self.board = self.board[:p] + v + self.board[p+1:]
+
+  def check3 (self, t):
+    assert len(t) == 3
+    if t.count(X) == 3: return X
+    if t.count(O) == 3: return O
+    return None
+
+  def check_win (self):
+    for i in range(3):
+      t = self.check3(self.board[i*3:i*3+3])
+      if t: return t
+      t = self.check3(self.board[i::3])
+      if t: return t
+
+    t = self.check3("".join(self.board[x] for x in (0,4,8)))
+    if t: return t
+    t = self.check3("".join(self.board[x] for x in (2,4,6)))
+    if t: return t
+
+    #add_hist(self.board, self.board.count(B))
+    if self.board.count(B) == 0: return B
+    return None
+
+  def reset (self):
+    #self.ready = False
+    self.my_turn = False
+    self.new_game = False
+    self.clear()
+
+  def clear (self):
+    for x in range(3):
+      for y in range(3):
+        self.set(x,y, B)
+
+  def handle_msg (self, private, sender, spectator, kind, msg):
+    if kind == 'CHAT':
+      add_hist(sender + ": " + msg['msg'])
+    elif kind == 'BOARD':
+      if self.spectate:
+        self.board = msg['board']
+    elif kind == 'MOVE':
+      if spectator: return
+      if self.spectate:
+        self.board = msg['board']
+        self.set(msg['pos'][0], msg['pos'][1], msg['player'])
+        w = self.check_win()
+        if w in (X,O):
+          add_hist(w, "won!")
+        return
+      other = X if self.i_am == O else O
+      if self.my_turn:
+        assert sender == self.name
+        piece = self.i_am
+        self.my_turn = False
+      else:
+        if self.new_game: self.clear()
+        self.new_game = False
+        piece = other
+        self.my_turn = True
+      x,y = msg['pos']
+      self.set(x,y, piece)
+
+      w = self.check_win()
+      if w is not None:
+        #self.reset()
+        was_mine = self.my_turn
+        self.my_turn = False
+        #self.ready = True
+        self.new_game = True
+        if w == self.i_am:
+          add_hist("You win!")
+          add_hist("New game; they go first.")
+        elif w == other:
+          add_hist("You lose!")
+          add_hist("New game; you go first.")
+          add_hist("Press Enter to start.")
+          self.my_turn = True
+        else:
+          self.my_turn = not was_mine
+          add_hist("It's a draw!")
+          add_hist("New game;", "your" if self.my_turn else "their", "turn.")
+          if self.my_turn: add_hist("Press Enter to start.")
+    else:
+      add_hist("Unhandled DATA:", msg)
+
+  def process (self, msgs):
+    for msg in msgs:
+      try:
+        if msg['TYPE'] == 'CONNECT':
+          self.reset()
+        elif msg['TYPE'] == 'DISCONNECT':
+          pass
+        elif msg['TYPE'] == 'HELLO':
+          net.send(dict(TYPE="HELLO", name=self.name, gamename="ttt"))
+        elif msg['TYPE'] == 'ERROR':
+          if msg.get("ERR") == "BADNAME":
+            self.name = None
+            add_hist("That name isn't allowed.  Try another.")
+          else:
+            add_hist("Disconnecting due to an error. (type: " +
+                      str(msg.get('ERR', "Unknnown")) + ")")
+          net.close()
+        elif msg['TYPE'] == 'WELCOME':
+          if self.spectate:
+            net.send(dict(TYPE="SPECTATE_GAME"))
+          else:
+            net.send(dict(TYPE="JOIN_GAME", size=2, allow_spectators=True))
+        elif msg['TYPE'] == 'DATA' or msg['TYPE'] == 'PRIV':
+          data = msg['msg']
+          spectator = msg['SPECTATOR']
+          self.handle_msg(msg['TYPE'] == 'PRIV', msg['SENDER'], spectator,
+                          data['type'], data)
+        elif msg['TYPE'] == 'LEAVE':
+          add_hist(msg['user'], "left the game.")
+        elif msg['TYPE'] == 'JOIN':
+          if msg['user'] != self.name:
+            add_hist(msg['user'], "joined.")
+        elif msg['TYPE'] == 'SPEC_LEAVE':
+          add_hist("Spectator", msg['user'], "left the game.")
+        elif msg['TYPE'] == 'SPEC_JOIN':
+          if msg['user'] != self.name:
+            add_hist("Spectator", msg['user'], "joined.")
+            #add_hist(str(msg))
+            if msg['YOU_LEAD']:
+              # I'm the leader, so I'll send the board so the spectator can
+              # see it.
+              net.send(dict(TYPE='PRIV', msg=dict(type='BOARD',
+                                                  player=self.i_am,
+                                                  board=self.board,
+                                                  dest=msg['user'])))
+          else:
+            add_hist("You're now spectating.")
+        elif msg['TYPE'] == 'ROOM_STATUS':
+          was_ready = self.ready
+          self.ready = msg['is_ready']
+          if msg['is_ready']:
+            if not was_ready:
+              self.reset()
+              if self.spectate:
+                add_hist("The game is afoot!")
+              elif msg['YOU_LEAD']:
+                add_hist("You're X and you go first!")
+                self.i_am = X
+                self.my_turn = True
+              else:
+                add_hist("You're O and you go second.")
+                self.i_am = O
+                self.my_turn = False
+          else:
+            add_hist("Waiting for other players...")
+
+        else:
+          add_hist("Got unknown message: " + str(msg))
+      except Exception as e:
+        #add_hist("Error handling network message: " + str(e))
+        add_hist("Error handling network message:")
+        import traceback
+        add_hist(traceback.format_exc())
+        net.close()
+
+  def make_move (self, x, y):
+    if self.new_game and self.my_turn:
+      self.new_game = False
+      self.clear()
+      return
+    if self.my_turn:
+      if self.get(x, y) != B:
+        add_hist("You can't move there!")
+        return
+      net.send(dict(TYPE='DATA', msg=dict(type='MOVE', pos=(x,y),
+                                          player=self.i_am,
+                                          board=self.board)))
+
+
+gs = TicTacToe()
+
+class Network (object):
+  def __init__ (self):
+    pass
+
+  @property
+  def is_connected (self):
+    print("is_connected", js_isconnected())
+    return js_isconnected() > 0
+
+  def connect (self):
+    if not server: return
+    add_hist()
+    add_hist("Attempting to connect...")
+    js_close()
+    js_connect(server)
+
+  def close (self):
+    js_close()
+
+  def send (self, data):
+    if isinstance(data, dict):
+      data = json.dumps(data).encode("utf8") + b"\n"
+
+    print("SEND", repr(data))
+    js_send(data.decode("utf8"))
+
+net = Network()
+
+
+
+# ---------------------------------------------------------------------------
+# Below is the UI stuff
+# ---------------------------------------------------------------------------
+
+def send_chat ():
+  """
+  Handle entry in the text input box
+  """
+  global entrytext
+
+  if not gs.name:
+    n = entrytext.strip()
+    if n:
+      if n.startswith("?"):
+        n = n[1:].strip()
+        gs.spectate = True
+      gs.name = n
+      add_hist("")
+      add_hist("Hello, " + n + "!")
+      net.connect()
+  else:
+    #add_hist(entrytext)
+    try:
+      net.send(dict(TYPE="DATA", msg=dict(type='CHAT', msg=entrytext)))
+    except Exception:
+      pass
+
+  entrytext = ''
+
+
+def add_hist (*msg):
+  """
+  Add to the chat log / history
+  """
+  msg = " ".join(str(s) for s in msg)
+  if '\n' in msg:
+    for m in msg.split("\n"):
+      add_hist(m)
+    return
+
+  import js
+  js.window.echo(msg)
+
+
+server = None
+
+# Text they're entering
+entrytext = ''
+
+
+def tell_instructions ():
+  if not server:
+    add_hist()
+    add_hist("Please enter the server name.")
+  elif not gs.name:
+    add_hist()
+    add_hist("Please enter your name.")
+    add_hist("Start your name with a question mark to spectate.")
+
+
+def on_js_loaded ():
+  add_hist("Welcome to Tic-Tac-Toe.")
+  global js_send, js_connect, js_close, js_isconnected
+  import js
+  js_send = js.window.js_send
+  js_connect = js.window.js_connect
+  js_isconnected = js.window.js_isconnected
+  js_close = js.window.js_close
+  s = js.window.location.hash
+  global server
+  if s:
+    if s.startswith("#"): s = s[1:]
+    server = s
+  tell_instructions()
+
+
+def py_on_data (data):
+  data = json.loads(data)
+  print("GOT DATA", data)
+
+  # Server must have been okay; update hash
+  import js
+  js.window.location.hash = server
+
+  gs.process([data])
+
+def py_on_terminal_input (text):
+  if not net.is_connected and gs.name:
+    print("Try to connect...")
+    net.connect()
+    entry_text = ''
+    return
+
+  text = text.strip()
+  if not text: return
+
+  global entrytext, server
+
+  if not server:
+    server = text
+    tell_instructions()
+    return
+
+  entrytext = text
+  send_chat()
+
+
+PY_EXPORTED = list(dict(gs=gs,
+                        py_on_terminal_input=py_on_terminal_input,
+                        py_on_data=py_on_data,
+                  ).items())
+
+
+</script>
+<!--
+   ***         ***         ***         ***         ***
+  ** **       ** **       ** **       ** **       ** **
+ **   **     **   **     **   **     **   **     **   **
+**     **   **     **   **     **   **     **   **     **
+-->
+
+
+
+<script type="text/javascript">
+// set the pyodide files URL (packages.json, pyodide.asm.data etc)
+window.languagePluginUrl = 'https://cdn.jsdelivr.net/pyodide/dev/full/';
+</script>
+<script src="https://cdn.jsdelivr.net/pyodide/dev/full/pyodide.js"></script>
+
+<script src="https://riversun.github.io/jsframe/jsframe.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/jquery"></script>
+<script src="https://cdn.jsdelivr.net/npm/jquery.terminal/js/jquery.terminal.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/jquery.terminal/css/jquery.terminal.min.css" rel="stylesheet"/>
+
+
+
+<style>
+  .terminal { --size: 1.5; --background: #eeeeee; --color: black; }
+</style>
+
+
+<script>
+
+var sender = null;
+var canv = null;
+var ctxt = null;
+
+
+var terminal;
+var jsframe;
+
+var gs;
+
+
+var hover = [-1,-1];
+
+
+function draw (data)
+{
+  if (!canv) return;
+  if (!gs) return;
+
+  var board = gs.board;
+
+  let bbox = canv.getBoundingClientRect();
+  canv.width = bbox.width;
+  canv.height = bbox.height;
+  ctxt.clearRect(0, 0, canv.width, canv.height);
+
+  if (gs.my_turn && gs.ready)
+    ctxt.fillStyle = 'rgba(200,255,200,1)';
+  else
+    ctxt.fillStyle = 'rgba(255,200,200,1)';
+  ctxt.fillRect(0, 0, canv.width, canv.height);
+
+  ctxt.lineWidth = 8;
+  ctxt.globalAlpha = 1;
+  ctxt.strokeStyle = 'rgba(0, 0, 0, 1)';
+
+  const pad = 0.01
+
+  moveTo(1/3, pad);
+  lineTo(1/3, 1-pad);
+
+  moveTo(2/3, pad);
+  lineTo(2/3, 1-pad);
+
+  moveTo(pad, 1/3);
+  lineTo(1-pad, 1/3);
+
+  moveTo(pad, 2/3);
+  lineTo(1-pad, 2/3);
+
+  ctxt.lineWidth = 15;
+
+  function drawx (cx, cy, h)
+  {
+    var f = 1/12;
+    if (h)
+    {
+      var fr = Math.sin((new Date()).getTime() * Math.PI * 2 / 700);
+      f += fr/48;
+    }
+    moveTo(cx-1/6+f, cy-1/6+f);
+    lineTo(cx+1/6-f, cy+1/6-f);
+    moveTo(cx+1/6-f, cy-1/6+f);
+    lineTo(cx-1/6+f, cy+1/6-f);
+  }
+  function drawo (cx, cy, h)
+  {
+    var f = 1/12;
+    if (h)
+    {
+      var fr = Math.sin((new Date()).getTime() * Math.PI * 2 / 700);
+      f += fr/48;
+    }
+    circleAt(cx, cy, 1/3-1/6-f);
+  }
+
+  for (let y = 0; y < 3; ++y)
+  {
+    for (let x = 0; x < 3; ++x)
+    {
+      let p = board[x+y*3];
+      let cx = x * 1/3 + 1/6;
+      let cy = y * 1/3 + 1/6;
+
+      if (x == hover[0] && y == hover[1])
+      {
+        if (gs.my_turn && gs.ready && !gs.new_game && p != 'X' && p != 'O')
+        {
+          ctxt.strokeStyle = 'rgba(40, 40, 40, 1)';
+          if (gs.i_am == 'X')
+            drawx(cx,cy, true);
+          else
+            drawo(cx,cy, true);
+          ctxt.strokeStyle = 'rgba(0, 0, 0, 1)';
+          continue;
+        }
+      }
+
+      if (p == "X")
+      {
+        drawx(cx,cy);
+      }
+      else if (p == "O")
+      {
+        drawo(cx,cy);
+      }
+    }
+  }
+}
+
+
+function process (data)
+{
+  if (gs) py_on_data(data);
+}
+
+
+function on_py_loaded ()
+{
+  new_terminal();
+  new_canv();
+}
+
+
+
+function js_connect (server)
+{
+  console.log("js_connect", sender);
+  if (sender) sender.close();
+  sender = new Sender(server);
+}
+function js_close ()
+{
+  if (!sender) return;
+  console.log("js_close", sender);
+  sender.close();
+  sender = null;
+}
+function js_send (data)
+{
+  if (!sender) return;
+  sender.send(data);
+}
+function js_isconnected ()
+{
+  if (!sender) return false;
+  if (!sender.socket) return false;
+  var rs = sender.socket.readyState;
+  if (rs == 0) return 1;
+  if (rs == 1) return 2;
+  return 0;
+}
+
+
+function on_canv_click (e)
+{
+  let x = Math.max(Math.min(Math.floor(e.offsetX * 3 / canv.width), 2), 0);
+  let y = Math.max(Math.min(Math.floor(e.offsetY * 3 / canv.height), 2), 0);
+
+  if (gs) gs.make_move(x, y);
+}
+
+function on_canv_mousemove (e)
+{
+  let x = Math.max(Math.min(Math.floor(e.offsetX * 3 / canv.width), 2), 0);
+  let y = Math.max(Math.min(Math.floor(e.offsetY * 3 / canv.height), 2), 0);
+
+  hover = [x,y];
+}
+
+
+function on_terminal_input (text)
+{
+  console.log("Terminal:", text);
+  if (gs)
+  {
+    py_on_terminal_input(text);
+  }
+}
+
+
+function moveTo (X, Y)
+{
+  X *= canv.width; Y *= canv.height;
+  ctxt.beginPath();
+  ctxt.moveTo(X,Y);
+}
+function lineTo (X, Y)
+{
+  X *= canv.width; Y *= canv.height;
+  ctxt.lineTo(0|X,0|Y);
+  ctxt.stroke();
+  ctxt.closePath();
+}
+function circleAt (X, Y, R)
+{
+  X *= canv.width; Y *= canv.height;
+  var rx = R * canv.width;
+  var ry = R * canv.height;
+  ctxt.beginPath();
+  ctxt.ellipse(X, Y, rx, ry, 0, 0, 2 * Math.PI);
+  ctxt.stroke();
+  ctxt.closePath();
+}
+
+
+
+class Sender
+{
+  constructor (address)
+  {
+    this.socket = null;
+    this.path = "";
+    this.port = 9877;
+    this.address = address
+    this.disconnected = false;
+    this.buf = "";
+    console.log("Sender created");
+    this.connect();
+  }
+  _on_close ()
+  {
+    console.log("Disconnected!", this);
+    if (this.disconnected == false)
+    {
+      echo("Disconnected.  Press Enter to try reconnecting.");
+      this.disconnected = true;
+    }
+    try
+    {
+      this.socket.close();
+    }
+    catch
+    {
+    }
+    this.socket = null;
+  }
+  connect ()
+  {
+    if (this.socket)
+    {
+      switch (this.socket.readyState)
+      {
+        case 0:
+        case 1:
+          return;
+      }
+    }
+    if (this.socket)
+    {
+      this.socket.onclose = this.socket.onmessage = null;
+      this.socket.close();
+      return;
+    }
+
+    //echo("Connecting to server...");
+
+    this.socket = new WebSocket("ws://" + this.address + ":" + this.port + "/" + this.path);
+    this.socket.onclose = this._on_close.bind(this);
+    this.socket.onerror = this._on_close.bind(this);
+
+    this.socket.onmessage = function (event) {
+      process(event.data);
+    };
+    this.socket.onopen = function (event) {
+      console.log("Connected!");
+      echo("Connected to server.");
+    }.bind(this);
+  }
+  send (data)
+  {
+    if (data.length == 0) return;
+    if (!this.socket || this.socket.readyState != 1 || this.buf.length)
+    {
+      if (this.buf.length == 0) setTimeout(this.send_later.bind(this), 500);
+      this.buf += data;
+    }
+    else
+    {
+      this.send_real(data)
+    }
+  }
+  send_later ()
+  {
+    var data = this.buf;
+    this.buf = '';
+    this.send(data);
+  }
+  send_real (data)
+  {
+    try
+    {
+      this.socket.send(data);
+    }
+    catch
+    {
+      this.socket.onerror();
+    }
+  }
+  close ()
+  {
+    if (!self.socket) return;
+    self.socket.close();
+    self.socket = null;
+  }
+}
+
+
+function try_pyodide ()
+{
+  // This is not the recommended way of loading pyodide, but the examples
+  // in the docs didn't work for me, so here's an ugly kludge.
+  try
+  {
+    pyodide.runPython("");
+  }
+  catch (err)
+  {
+    setTimeout(try_pyodide, 250);
+    return;
+  }
+  console.log("Loading...");
+  var pycode = document.getElementById("sourcecode").innerText;
+  pyodide.runPython(pycode);
+  console.log("Code (", pycode.length, "characters ) run");
+  let exported = pyodide.globals.get("PY_EXPORTED");
+  if (exported)
+  {
+    console.log("Importing", exported.length, "items from Python into JS");
+    for (var i = 0; i < exported.length; ++i)
+    {
+      let k = exported.get(i).get(0);
+      let v = exported.get(i).get(1);
+      window[k] = v;
+    }
+  }
+  else
+  {
+    console.log("Python did not export anything to JS");
+  }
+  on_py_loaded();
+  let starter = pyodide.globals.get("on_js_loaded");
+  if (starter) starter()
+}
+
+
+function new_terminal ()
+{
+  let frame = jsframe.create({
+    title: 'Chat',
+    left: 440, top: 20, width: 700, height: 400,
+    movable: true,
+    resizable: true,
+    html: '<div id="terminal_window" style="padding:2px;font-size:12px;color:darkgray;background:lightgray"><div id="terminal_contents" style="height:100%; overflow:scroll;"></div></div>'
+  });
+
+  frame.hideFrameComponent('closeButton');
+  frame.show();
+
+  terminal = $('#terminal_contents').terminal(
+    on_terminal_input,
+    {
+      outputLimit: 5000,
+      greetings: "",
+      prompt: "> ",
+    }
+  );
+}
+
+
+function echo (msg)
+{
+  terminal.echo(msg);
+}
+
+
+function new_canv ()
+{
+  let frame = jsframe.create({
+    title: 'Tic-Tac-Toe',
+    left: 20, top: 20, width: 400, height: 400,
+    movable: true,
+    resizable: true,
+    html: '<canvas id="canvas" style="border:0px;width:100%;height:100%;">'
+  });
+
+  frame.hideFrameComponent('closeButton');
+  frame.show();
+
+  canv = document.getElementById("canvas");
+  ctxt = canv.getContext("2d");
+
+  canv.addEventListener("click", on_canv_click, true);
+  canv.addEventListener("mousemove", on_canv_mousemove, true);
+}
+
+
+function setup ()
+{
+  jsframe = new JSFrame();
+  setInterval(draw, 50);
+  try_pyodide();
+}
+
+</script>
+
+</head>
+<body bgcolor="#888888">
+<script>
+setup();
+</script>
+</body>
+</html>
