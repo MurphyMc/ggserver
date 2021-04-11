@@ -25,7 +25,7 @@ A basic usage pattern should probably look something like this:
   * Watch the `ROOM_STATUS` messages.
   * Send and receive `DATA`/`PRIV` messages, possibly doing different things if you are the room leader.
 
-Each message is sent over the connection as a newline-terminated JSON string, where the type has the key "TYPE"; other keys and their values are specific to the message type.  As a quick example, when a client wants to join a game of Tic-Tac-Toe, it might send the string `'{"TYPE": "HELLO", "name": "LizzyMagie", "gamename": "ttt"\n'`.  There are libraries for interacting with JSON in just about every programming language today.
+Each message is sent over the connection as a newline-terminated JSON string, where the type has the key "TYPE"; other keys and their values are specific to the message type.  As a quick example, when a client wants to join a game of Tic-Tac-Toe, it might send the string `'{"TYPE": "HELLO", "name": "LizzyMagie", "gamename": "ttt"}\n'`.  There are libraries for interacting with JSON in just about every programming language today.
 
 
 ## Examples
@@ -90,7 +90,7 @@ Contains a mass of information about the room.
 * `allow_spectators`: True if spectators are allowed in this room.
 * `size`: The size of this room.
 * `is_ready`: Whether the room is ready (has the right number of players).
-* `was_ready`: Whether the room was ready the last to status was sent.
+* `was_ready`: Whether the room was ready the last time status was sent.
 * `leaderstate`: See the `LEADERSTATE` client message.
 
 ### `CHOOSE`
@@ -118,7 +118,7 @@ Data sent with this client-to-server message is shared with others in the same r
 
 ### `PRIV`
 Similar to `DATA` but sends the message to a specific other user in the room.
-user: The name of the user to send to.
+* `user`: The name of the user to send to.
 
 ### `PING`
 Elicits a `PONG` response containing all the same data from the server.  This is meant for checking that your connection to the server still works, and for preventing the server from disconnecting you due to idling.
