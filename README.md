@@ -14,7 +14,9 @@ Each room has a leader; if the leader leaves, GGS elects another player in the r
 
 ## Writing a Client
 
-GGS uses TCP, and defaults to listening on port 9876.  The client and server send messages to each other -- there are server-to-client messages ("server messages") and client-to-server messages ("client messages").  They all have a *type* and some other attributes.  As mentioned, for the most part, the actual GGS server stays out of your way -- it just sets clients up in rooms and passes data between them (which they send and receive using `PRIV` and `DATA` messages, discussed below).
+GGS can use normal TCP sockets as well as websockets.  The two are equivalent.  By default it listens on port 9876 for TCP and 9877 for websockets.
+
+The client and server send messages to each other -- there are server-to-client messages ("server messages") and client-to-server messages ("client messages").  They all have a *type* and some other attributes.  As mentioned, for the most part, the actual GGS server stays out of your way -- it just sets clients up in rooms and passes data between them (which they send and receive using `PRIV` and `DATA` messages, discussed below).
 
 A basic usage pattern should probably look something like this:
 * Wait for the server `HELLO`.
@@ -30,8 +32,11 @@ Each message is sent over the connection as a newline-terminated JSON string, wh
 
 ## Examples
 
-Currently, there's only one example -- a terminal-based Tic-Tac-Toe game in Python.  Run it and pass the address of the server on the command line (e.g., `python3 ttt.py foo.example.com`).  The code is not beautiful or well documented or anything, but it does serve as a working example.
+Currently, there are two very similar examples.  Their code is not beautiful or well documented or anything, but they do serve as working examples.
 
+The first is a terminal-based Tic-Tac-Toe game in Python which uses normal TCP sockets.  Run it and pass the address of the server on the command line (e.g., `python3 ttt.py foo.example.com`).
+
+The second is a web-based version of Tic-Tac-Toe.  It uses websockets, of course, but is fully compatible with the terminal-based version.  Indeed, they share much of the same code: part of the web version is written in JavaScript, but the rest of it is the same Python version -- run in the browser using Pyodide.  You can include the server name as part of the URL like http://example.com/ttt.html#example.com.  If you don't, it'll prompt you.
 
 ## Server to Client Messages
 
