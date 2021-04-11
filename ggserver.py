@@ -157,6 +157,7 @@ class ConnectionBase (object):
 
   def process (self, data):
     self.activity_time = time.time()
+    if isinstance(data, bytes): data = data.decode("utf8")
     msg = json.loads(data)
     t = msg["TYPE"]
     f = getattr(self, "_handle_" + t, None)
