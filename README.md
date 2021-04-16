@@ -34,7 +34,7 @@ Each message is sent over the connection as a newline-terminated JSON string, wh
 
 Currently, there are two very similar examples.  Their code is not beautiful or well documented or anything, but they do serve as working examples.
 
-The first is a terminal-based Tic-Tac-Toe game in Python which uses normal TCP sockets.  Run it and pass the address of the server on the command line (e.g., `python3 ttt.py foo.example.com`).
+The first is a terminal-based Tic-Tac-Toe game in Python which uses normal TCP sockets.  Run it and pass the address of the server on the command line (e.g., `python3 ttt.py foo.example.com`).  This uses curses for terminal control, so it probably works out of the box on Unix-like systems.  On Windows, there are reports of it working using windows-curses (`pip install windows-curses`). 
 
 The second is a web-based version of Tic-Tac-Toe.  It uses websockets, of course, but is fully compatible with the terminal-based version.  Indeed, they share much of the same code: part of the web version is written in JavaScript, but the rest of it is the same Python version -- run in the browser using Pyodide.  You can include the server name as part of the URL like http://example.com/ttt.html#example.com.  If you don't, it'll prompt you.
 
