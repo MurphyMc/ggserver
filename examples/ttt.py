@@ -549,7 +549,7 @@ def main (scr):
         e = e[-l:]
         addstr(scr, y, x, e)
         if len(e) < l:
-          addstr(scr, y, x+len(e), " " * (l-len(e)+1))
+          scr.hline(y, x+len(e), " ", (l-len(e)+1))
         try:
           scr.move(y,x+len(e))
         except Exception:
